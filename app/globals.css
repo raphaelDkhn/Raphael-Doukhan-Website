@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #002fa7;
+}
+
+.dark {
+  --background: #000717;
+  --foreground: #d0dbe8;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Google Sans Code", monospace;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* Center block-level LaTeX formulas */
+.katex-display {
+  text-align: center;
+  margin: 1.5rem 0;
+}
+
+.katex-display > .katex {
+  text-align: center;
+}

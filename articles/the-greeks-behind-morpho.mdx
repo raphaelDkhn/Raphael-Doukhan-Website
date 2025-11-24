@@ -1,0 +1,110 @@
+---
+title: "The Greeks behind Morpho"
+date: "2025-11-24"
+description: "Explores how Morpho V2’s lending mechanics mirror options payoffs."
+bannerImage: "/images/the-greeks-behind-morpho.png"
+---
+
+Morpho is evolving. Known historically as a yield optimizer, Morpho is now a foundational layer for decentralized credit with permissionless market creation. With the upcoming release of Morpho V2, the protocol is introducing an intent-based lending platform powered by fixed-rate and fixed-term loans.
+
+By reading their [announcement](https://morpho.org/blog/morpho-v2-liberating-the-potential-of-onchain-loans/), I said to myself:
+
+**What if we view Morpho V2 as an option protocol?**
+
+This article explores this idea, examining how the mechanics of fixed-term decentralized credit can effectively mimic the payout profiles and risk management strategies of options markets.
+
+# **The Isomorphism of Lending and Options**
+
+## **The Merton Model: Corporate Debt as Options**
+
+The theoretical basis for this analysis is Merton's model (1974), which demonstrated that a firm's equity and debt can be priced using option pricing theory.
+
+In the Merton framework, a firm has assets $V_t$ and a zero-coupon debt of face value $K$ maturing at time $T$.
+
+- **Equity Holders** have a residual claim.
+  If $V_T > K$, they receive $V_T - K$.
+  If $V_T < K$, they receive 0.
+  This payoff, $\max(V_T - K, 0)$, is exactly the payoff of a European Call Option on the firm's assets with strike $K$.
+- Debt Holders have a priority claim.
+  If $V_T > K$, they receive $K$.
+  If $V_T < K$, they receive $V_T$ (the assets).
+  Their payoff is $\min(V_T, K)$, which is equivalent to holding a risk-free bond paying $K$ and selling a Put Option on the assets with strike $K$.
+
+## **Translating Merton to Morpho**
+
+We can map this framework directly to a Morpho market.
+
+- **The Asset ($V_t$)** is the Collateral Token (e.g., WBTC).
+- **The Strike ($K$)** is the Loan Principal + Accrued Interest.
+- **The Borrower** is the Equity Holder. They hold the collateral but owe the debt. Their position is a **Long Call Option** on the collateral. They benefit from upside volatility.
+- **The Lender** is the Debt Holder. They are **Short a Put Option** on the collateral. If the collateral value crashes below the debt value (and liquidation fails), they take the loss.
+
+The interest rate paid by the borrower is not just the "cost of money"; it is the option premium paid to the lender for writing the put option (insurance) against the collateral's downside.
+
+## **The Barrier Option Refinement**
+
+The classic Merton model assumes default only happens at maturity $T$. However, Morpho protocol enforce continuous solvency checks. If the collateral value drops below a certain threshold _at any time_ $t < T$, liquidation is triggered. (I guess we could theoretically bypass this with a custom oracle, but I won't go into details here).
+
+This transforms the Borrower's position from a standard European Call into a Down-and-Out Call Option (a Barrier Option).
+
+- The Barrier ($H$): The Liquidation Threshold.
+
+$$
+H = \frac{\text{Debt}}{\text{LLTV}}
+$$
+
+- **Knock-Out Event**: If the collateral price $S_t$ touches or breaches $H$, the option is "knocked out." The borrower loses the collateral (the underlying asset) and the loan is extinguished.
+
+# **Mapping Black-Scholes Parameters to Morpho V2**
+
+The standard pricing equation for a call option $C(S,t)$ is governed by five parameters: Spot Price ($S$), Strike ($K$), Time to Maturity ($T-t$), Risk-Free Rate ($r$), and Volatility ($\sigma$).
+
+| **Black-Scholes Parameter** | **Morpho V2**                    | **Description & Nuance**                                                                                                                  |
+| --------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Spot Price $S_t$**        | **Collateral Value**             | Real-time price from the Oracle (e.g., Chainlink).                                                                                        |
+| **Strike Price $K$**        | **Debt Principal**               | The amount owed. In V2, for a fixed-term loan, $K$ is the Principal + Fixed Interest at maturity.                                         |
+| **Barrier $H$**             | **Liquidation Price**            | $H = K / \text{LLTV}$. The explicit trigger for the "Knock-Out." High LLTV means the Barrier is closer to Spot.                           |
+| **Time $T-t$**              | **Loan Duration**                | In V2 we can set explicit fixed duration (e.g., 30 days). This allows for precise Theta calculation.                                       |
+| **Risk-Free Rate $r$**      | **Base Yield / Risk-Free Proxy** | The opportunity cost of capital (e.g., sDAI yield)                                                                                        |
+| **Volatility $\sigma$**     | **Token Volatility**             | The annualized standard deviation of collateral returns. This is the unobservable parameter that dictates the "fair value" of the spread. |
+
+## Put-Call Parity
+
+The fundamental theorem of derivatives pricing is Put-Call Parity,
+which states that holding a Call option and Cash is equivalent to holding a Put option and the Underlying Asset.
+
+$$
+C + KE^{-rT} = P + S
+$$
+
+In the context of a Morpho V2, we can replicate these exposures through borrowing and supplying assets.
+
+### The Synthetic Put (Shorting via Borrowing)
+
+Consider a user who believes the price of ETH (asset $S$) will fall. They wish to purchase a Put Option with a strike price $K$. In Morpho V2, the user executes the following atomic transaction:
+
+1. **Collateralize:** Deposit stablecoins (USDC) worth $C$.
+2. **Borrow:** Borrow ETH worth $D$.
+3. **Sell:** Immediately swap the borrowed ETH for USDC.
+
+- **Initial State:** The user holds USDC (Collateral + Proceeds from Sale) and owes ETH.
+- **Scenario A (Price Falls):** The price of ETH drops. The user buys back the ETH at a lower price to repay the loan. The difference between the initial sale price and the repurchase price is profit. This mirrors the payoff of a Long Put.   
+- **Scenario B (Price Rises):** The price of ETH rises. The debt becomes more expensive to repay.
+- **The Stop Loss (Strike/Barrier):** If the price rises to a point where the Loan-to-Value (LTV) hits the Liquidation LTV (LLTV), the protocol liquidates the collateral. This acts as a "Stop Loss" on the Put position.
+
+### The Synthetic Call (Leveraged Long)
+Consider a user who believes ETH will rise. They wish to purchase a Call Option. In Morpho V2:
+
+1. **Collateralize:** Deposit ETH.
+2. **Borrow:** Borrow USDC.
+3. **Loop:** Swap USDC for more ETH and redeposit.
+
+- **Payoff:** The user now holds $1 + Leverage$ amount of ETH. If ETH rises, their equity expands non-linearly (convexity).
+- **The Barrier:** If ETH falls to the LLTV, the protocol sells the collateral to repay the debt. The user loses their principal. This is a Down-and-Out Call Option.
+
+
+---
+
+
+The main drawback is that you have to lock up much more capital than you would by simply buying an option. 
+But the fascinating part is that Morpho V2 isn’t just a lending protocol, it’s a **predictable risk engine**.
