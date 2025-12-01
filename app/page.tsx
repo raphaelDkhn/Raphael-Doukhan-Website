@@ -47,7 +47,7 @@ export default function Home() {
           </div>
           <br />
           <p className="text-[var(--foreground)] text-sm leading-7">
-            Hi, I'm Raphael. I'm a software engineer. Currently working at{" "}
+            Hi, I’m Raphael, a software engineer at{" "}
             <a
               href="https://www.gizatech.xyz/"
               target="_blank"
@@ -58,13 +58,9 @@ export default function Home() {
             </a>
             .
             <br />
-            This website allows me to publish anything that interests me.
-            <br />
-            <br />
-            I'm not much of a writer, and I don’t always have the time or
-            ability to craft long, polished posts. Most entries will be a little
-            rough. Think of this space as a place for me to brainstorm and
-            explore ideas.
+            This website is where I share whatever interests me. I’m not much of
+            a writer, so posts will be short and rough—just a place for me to
+            think out loud and explore ideas
           </p>
 
           <br />
