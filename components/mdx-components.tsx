@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import React from "react";
 
 export type MDXComponents = {
   [key: string]: React.ComponentType<any> | undefined;
@@ -47,16 +48,36 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
     li: ({ children }) => (
       <li className="text-[var(--foreground)] text-sm leading-7 mb-1">{children}</li>
     ),
-    code: ({ children }) => (
-      <code className="bg-gray-100 dark:bg-gray-800 text-[var(--foreground)] px-1 py-0.5 rounded text-xs font-mono">
-        {children}
-      </code>
-    ),
-    pre: ({ children }) => (
-      <pre className="bg-gray-100 dark:bg-gray-800 text-[var(--foreground)] p-4 rounded overflow-x-auto mb-4 text-xs font-mono">
-        {children}
-      </pre>
-    ),
+    code: ({ children, className, ...props }: any) => {
+      // If className includes 'hljs', it's inside a highlighted code block
+      const isInCodeBlock = className?.includes('hljs');
+      if (isInCodeBlock) {
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        );
+      }
+      // Otherwise, it's inline code
+      return (
+        <code className="bg-gray-100 dark:bg-gray-800 text-[var(--foreground)] px-1 py-0.5 rounded text-xs font-mono" {...props}>
+          {children}
+        </code>
+      );
+    },
+    pre: ({ children, className, ...props }: any) => {
+      // Check if children contain a highlighted code element
+      const hasHighlightedCode = React.isValidElement(children) && 
+        (children as any)?.props?.className?.includes('hljs');
+      return (
+        <pre 
+          className={`${hasHighlightedCode ? 'hljs-wrapper' : 'bg-gray-100 dark:bg-gray-800'} p-4 rounded overflow-x-auto mb-4 text-xs font-mono`}
+          {...props}
+        >
+          {children}
+        </pre>
+      );
+    },
     blockquote: ({ children }) => (
       <blockquote className="border-l-4 border-[var(--foreground)] pl-4 italic text-[var(--foreground)] text-sm mb-4">
         {children}

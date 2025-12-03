@@ -1,0 +1,230 @@
+---
+title: "Building Efficient Succinct Matrix Multiplication Proofs"
+date: "2025-12-03"
+description: "Explores how Freivalds' Algorithm enables efficient ZK proofs of matrix multiplication."
+bannerImage: "/images/building-efficient-succinct-matrix-multiplication-proofs.png"
+---
+
+Matrix multiplication is computationally expensive—$O(n^3)$ operations for naive multiplication, or $O(n^{2.81})$ if you're using Strassen's algorithm.
+But verification ($C = A \times B$) ? That can be done in just $O(n^2)$ using an elegant probabilistic algorithm from 1977 called Freivalds' algorithm.
+
+This means that when building a zero-knowledge proof of matrix multiplication, we don't need to prove we performed the full $O(n^3)$ computation. Instead, we can prove we correctly ran the $O(n^2)$ verification algorithm.
+
+In this post, I'll walk through my [implementation](https://github.com/raphaelDkhn/freivalds-stwo) of an AIR to prove Freivalds' algorithm with Starkware's [S-two](https://zksecurity.github.io/stwo-book/introduction.html) STARK prover. We'll see how a 40-year-old algorithm combines beautifully with modern cryptographic proof systems, to prove efficiently matrix multiplications.
+
+## The Elegance of Freivalds' Algorithm
+
+Instead of checking every element in the product matrix $C = A \times B$, Freivalds' algorithm verifies a single vector equation:
+
+$$A \times (B \times r) = C \times r$$
+
+where $r$ is a random vector.
+
+This approach relies on a probabilistic guarantee: if $C \neq A \times B$, this equation will fail with probability at least $1 - (n-1)/|F|$, where $n$ is the matrix dimension. Using the Mersenne-31 field, our soundness error may be negligible for practical matrix sizes (e.g., ~$2^{-23}$ for 256×256 matrices).
+
+Here's how it works step by step:
+
+1. **Generate a random vector**: $r = [1, \alpha, \alpha^2, \alpha^3, \ldots, \alpha^{n-1}]$
+2. **Compute** $v_1 = B \times r$ (matrix-vector multiplication, $O(n^2)$)
+3. **Compute** $v_2 = A \times v_1$ (matrix-vector multiplication, $O(n^2)$)
+4. **Compute** $v_3 = C \times r$ (matrix-vector multiplication, $O(n^2)$)
+5. **Verify** that $v_2 = v_3$
+
+If $C$ truly equals $A \times B$, then $C \times r = (A \times B) \times r = A \times (B \times r)$ by associativity, so the check always passes. If $C$ doesn't equal $A \times B$, we're asking whether the polynomial identity $(C - AB) \times r = 0$ holds for a random $r$. By the Schwartz-Zippel lemma, this occurs with negligible probability, effectively catching any incorrect result.
+
+## Translating Freivalds into a STARK
+
+The challenge is encoding this probabilistic verification into constraints that a STARK proof system can verify. We need to think about our computation as a trace of state transitions, where each row represents one step of the computation.
+
+### The Three-Phase Trace Structure
+
+Our AIR uses three types of columns:
+
+**Phase 0: Preprocessed Columns** (committed before anything else)
+
+- `is_first`: Flags the first column of each matrix row
+- `is_last`: Flags the last column of each matrix row
+
+These structural markers are independent of the input and help our constraints distinguish between starting, continuing, and ending computations within each row.
+
+**Phase 1: Main Trace Columns** (committed before the challenge)
+
+- `a_val`: Elements from matrix $A$
+- `b_val`: Elements from matrix $B$
+- `c_val`: Elements from matrix $C$
+
+**Phase 2: Interaction Trace Columns** (committed after the challenge $\alpha$)
+
+- `r_val`: Random vector element $\alpha^{\text{col\_index}}$
+- `v1_val`: Precomputed $v_1 = B \times r$
+- `v1_acc`: Running accumulator for computing $B \times r$
+- `v2_acc`: Running accumulator for computing $A \times v_1$
+- `v3_acc`: Running accumulator for computing $C \times r$
+
+### Why Thi Order Matters
+
+This ordering isn't arbitrary. The matrices $A$, $B$, and $C$ **must be committed before** the random challenge $\alpha$ is drawn. Otherwise, a malicious prover could:
+
+1. Observe $\alpha$ first
+2. Construct specially-crafted fake matrices that satisfy $A \times (B \times r) = C \times r$ for this specific $\alpha$
+3. Submit a fraudulent proof that would pass verification
+
+By using the Fiat-Shamir, we ensure the prover commits to the computation before knowing the verifier's challenge.
+
+## The Constraint System
+
+Now let's define the polynomial constraints that enforce correct Freivalds verification. Each constraint must hold for every row in the trace.
+
+### Constraint 1: Random Vector Generation
+
+The random vector follows a geometric progression:
+
+```rust
+// First element must be 1
+is_first * (r_val - 1) = 0
+
+// Each subsequent element: r[i+1] = α · r[i]
+(1 - is_first) * (r_val - α * r_val_prev) = 0
+```
+
+This generates $r = [1, \alpha, \alpha^2, \alpha^3, \ldots, \alpha^{n-1}]$ across each row.
+
+### Constraint 2: Accumulator Initialization
+
+When starting a new row (`is_first = 1`), we initialize our running accumulators:
+
+```rust
+is_first * (v1_acc - b_val * r_val) = 0
+is_first * (v2_acc - a_val * v1_val) = 0
+is_first * (v3_acc - c_val * r_val) = 0
+```
+
+Each accumulator starts with its first term in the dot product.
+
+### Constraint 3: Accumulator Updates
+
+For subsequent columns within a row, we accumulate the dot products:
+
+```rust
+(1 - is_first) * (v1_acc - v1_acc_prev - b_val * r_val) = 0
+(1 - is_first) * (v2_acc - v2_acc_prev - a_val * v1_val) = 0
+(1 - is_first) * (v3_acc - v3_acc_prev - c_val * r_val) = 0
+```
+
+These constraints enforce that we're computing the running sum of products correctly.
+
+### Constraint 4: The Freivalds Check
+
+At the end of each matrix row (`is_last = 1`), we verify the core equation:
+
+```rust
+is_last * (v2_acc - v3_acc) = 0
+```
+
+This single constraint enforces that $(A \times v_1)[i] = (C \times r)[i]$ for each row $i$, which is exactly the Freivalds verification condition.
+
+## Public vs. Private Matrices
+
+We can configure which matrices are public (known to the verifier) and which stay hidden behind Merkle commitments.
+
+```rust
+// Example configurations
+PublicInputConfig::default()
+    .with_a_public(true)
+    .with_b_public(false)
+    .with_c_public(false)
+```
+
+When matrices are marked as public, we use **LogUp**—a lookup argument that binds trace values to public inputs. This ensures the prover can't substitute different values in the trace while claiming they match the public inputs.
+
+## Performance
+
+I benchmarked the Freivalds-based approach against the naive method (proving the full $O(n^3)$ multiplication):
+
+| Matrix Size | Freivalds Prove Time | Freivalds Verify Time | Naive Prove Time | Naive Verify Time | Proving Speedup | Verification Speedup |
+| ----------- | -------------------- | --------------------- | ---------------- | ----------------- | --------------- | -------------------- |
+| 128×128     | 24 ms                | 290 µs                | 1.41 s           | 460 µs            | 57.03×          | 1.58×                |
+| 256×256     | 83 ms                | 340 µs                | 15.08 s          | 559 µs            | 181.69×         | 1.64×                |
+| 512×512     | 210 ms               | 390 µs                | -                | -                 | —               | —                    |
+| 1024×1024   | 748 ms               | 450 µs                | -                | -                 | —               | —                    |
+| 2048×2048   | 3.03 s               | 470 µs                | -                | -                 | —               | —                    |
+
+As expected the speedup grows dramatically with matrix size.
+
+## How the Prover Works
+
+Let's trace through what happens when you generate a proof:
+
+```rust
+let proof = Prover::new()
+    .with_public_config(PublicInputConfig::all_private())
+    .prove(&input)?;
+```
+
+### Phase 0: Commit Preprocessed Trace
+
+```rust
+let preprocessed_trace = gen_preprocessed_trace(log_size, matrix_size);
+tree_builder.extend_evals(preprocessed_trace);
+tree_builder.commit(channel);
+```
+
+We commit to the structural columns (`is_first`, `is_last`) that define the computation's shape but don't depend on the specific matrices.
+
+### Phase 1: Commit the Matrices
+
+```rust
+// Mix the statement into the Fiat-Shamir channel
+let stmt = FreivaldsStatement::from_input(input, log_size, public_config);
+stmt.mix_into(channel);
+
+// Commit to A, B, C values
+let matrix_trace = gen_matrix_trace(log_size, input);
+tree_builder.extend_evals(matrix_trace.clone());
+tree_builder.commit(channel);
+```
+
+The matrices are now locked in. The prover cannot change them without invalidating the proof.
+
+### Phase 2: Draw the Random Challenge
+
+```rust
+let alpha: M31 = channel.draw_secure_felt().0.0;
+```
+
+Only now—after the matrices are committed—does the prover learn $\alpha$. This ordering is enforced by the Fiat-Shamir transform, which deterministically derives $\alpha$ from the transcript of prior commitments.
+
+### Phase 3: Generate the Interaction Trace
+
+```rust
+let (interaction_trace, claimed_sum) = gen_interaction_trace(
+    log_size,
+    input,
+    alpha,
+    &matrix_trace,
+    &lookup_elements,
+    public_config,
+);
+tree_builder.extend_evals(interaction_trace);
+tree_builder.commit(channel);
+```
+
+With $\alpha$ now known, we can compute the random vector, perform the matrix-vector multiplications, and build the accumulator columns.
+
+### Phase 4: Generate the STARK Proof
+
+```rust
+let component = FreivaldsComponent::new(
+    &mut TraceLocationAllocator::new_with_preprocessed_columns(&preprocessed_column_ids()),
+    FreivaldsEval::new(log_size, matrix_size, alpha, public_config, lookup_elements),
+    claimed_sum,
+);
+
+let stark_proof = prove(&[&component], channel, commitment_scheme)?;
+```
+
+The component bundles our constraints with the trace, and the STARK prover generates the final proof that these constraints hold.
+
+---
+
+You can find the full implementation [here](https://github.com/raphaelDkhn/freivalds-stwo).
