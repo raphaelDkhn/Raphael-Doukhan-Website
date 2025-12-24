@@ -1,0 +1,271 @@
+---
+title: "Publicly Verifiable LLM Watermark Detection"
+date: "2025-12-24"
+description: "Explores how to publicly verify LLM watermark detection."
+bannerImage: "/images/proving-llm-watermark-detection-in-zero-knowledge.png"
+---
+
+As large language models become more widespread, distinguishing AI-generated text from human-written content has become a real problem. Watermarking is one of the most promising ideas: during generation, the model is nudged so that its output contains a subtle statistical “signature” that a detector can later pick up.
+
+But there’s a catch: **most watermark detectors rely on a secret key**. If you reveal the key, anyone can forge watermarks or tailor attacks. If you keep it secret, the public can’t verify your claim that “this text is watermarked.”
+
+So the natural question is:
+
+> Can we prove that watermark detection was run correctly **without revealing the secret key**?
+
+This post explains how I did exactly that for **Unigram watermark detection**, by building a **STARK prover** using StarkWare’s **Stwo** library:  
+Implementation: https://github.com/raphaelDkhn/zunigram
+
+You’ll see how Unigram detection turns into an **Algebraic Intermediate Representation (AIR)**, so that anyone can verify that an LLM output is watermarked, while the detector’s secret key stays hidden.
+
+---
+
+## What we’re proving
+
+Given a token sequence `s = (t₀, …, t_{n-1})`, we want to prove the statement:
+
+- “There exists a secret key `k` such that, if we compute `PRF_k(t_i)` for every token and count how many land in the green set, the final green count exceeds a detection threshold.”
+
+In STARK terms:
+
+- **Public inputs**: the token sequence, the threshold parameters, and the final claimed result
+- **Private inputs**: the secret key `k`
+- **Witness**: all intermediate values (PRF outputs, per-token flags, running sums, etc.)
+
+---
+
+## The Unigram Watermarking Scheme
+
+The **Unigram watermark** introduced by [Zhao et al. (2023)](https://arxiv.org/abs/2306.17439) is appealingly simple. Unlike k-gram watermarks that depend on token context, Unigram uses a *fixed* partition of the vocabulary into “green” and “red” tokens.
+
+### Generation
+A pseudorandom function (PRF) keyed by a secret `k` maps each token ID to green or red. The model’s sampler is biased to prefer green tokens, creating a small but detectable imbalance.
+
+### Detection
+Given suspect text tokens:
+
+1. For each token ID, compute `PRF_k(token_id)`
+2. Classify the token as green/red
+3. Count greens `|s|_G`
+4. Compare against the unwatermarked expectation
+
+If the green fraction is `γ` (often `γ = 0.5`), then under the null hypothesis (unwatermarked text), the expected number of green tokens is `γ·n`. A common detection statistic is the z-score:
+
+$$
+z = \frac{|s|_G - \gamma \cdot n}{\sqrt{n \cdot \gamma \cdot (1 - \gamma)}}
+$$
+
+If `z` is above a chosen threshold, we declare the text watermarked.
+
+---
+
+## Why prove detection in zero-knowledge?
+
+In the normal setup, anyone verifying detection must either:
+
+- **See the secret key** (bad: enables forging / key compromise), or
+- **Trust the detector** (bad: unverifiable claims)
+
+A proof fixes this: the detector can publish a cryptographic proof that:
+
+- the PRF was computed correctly with *some* key `k`,
+- the green count was computed correctly,
+- and the detection threshold rule was applied correctly,
+
+**without revealing `k`**.
+
+---
+
+## A quick intro to Stwo
+
+[Stwo](https://zksecurity.github.io/stwo-book/) is StarkWare’s Rust implementation of a **Circle STARK** prover/verifier system. The mental model is:
+
+- You describe your computation as a **trace** (a table of values).
+- You write polynomial constraints (an **AIR**) that must hold across that trace.
+- Stwo produces a STARK proof that “there exists a trace satisfying these constraints,” and the verifier checks it efficiently.
+
+Two Stwo features that matters for this project:
+
+1.**Modular AIR composition**  
+   You can build separate AIR “components” (Poseidon2, range checks, Unigram accumulation) and connect them.
+
+2.**LogUp interactions (lookup arguments)**  
+   When one component *produces* pairs like `(token, prf_output)` and another component *consumes* them, LogUp enforces that both sides match—without wiring the entire thing into one monolithic trace.
+
+---
+
+## Translating detection into AIR constraints
+
+To prove Unigram detection, we need to constrain these operations:
+
+1. **PRF evaluation** per token: `PRF_k(token_id)`
+2. **Green classification**: `is_green = 1` iff PRF output is in the green range
+3. **Accumulation**: running count of green tokens
+4. **Threshold check**: final count exceeds (or matches) the claimed threshold rule
+
+---
+
+## PRF choice: Poseidon2
+
+For the PRF, I use **Poseidon2**, a zk-friendly hash. For each token ID, we compute:
+
+$$
+\text{prf\_output} = \text{Poseidon2}(k, \text{token\_id})
+$$
+
+### Poseidon2 component (AIR)
+Conceptually, the Poseidon2 AIR:
+
+- takes `(k, token_id)` as inputs,
+- runs the Poseidon2 permutation rounds,
+- outputs `prf_output`,
+- and exposes `(token_id, prf_output)` through a LogUp table so that other components can consume it.
+
+Each token requires one Poseidon2 invocation, which is the dominant cost.
+
+---
+
+## Green classification via range check
+
+A token is “green” if its PRF output, interpreted as a field element, falls below a threshold.
+
+With `γ = 0.5` over the **Mersenne-31 field**:
+
+$$
+\text{is\_green} =
+\begin{cases}
+1 & \text{if } \text{prf\_output} < 2^{30} \\
+0 & \text{otherwise}
+\end{cases}
+$$
+
+This is implemented with a **range-check / comparison component** that enforces “`prf_output` is less-than threshold” when `is_green = 1`, and the opposite case when `is_green = 0`.
+
+---
+
+## The Unigram component
+
+This is the component that:
+
+- reads tokens,
+- consumes the PRF outputs,
+- computes `is_green`,
+- and accumulates the running green count.
+
+### Trace structure
+
+**Main trace columns**
+- `token`: current token ID
+- `is_green`: binary flag
+- `is_padding`: binary flag for padding rows (to reach a power-of-two trace length)
+- `green_count`: running sum of green tokens
+
+**Interaction (LogUp) columns**
+- values for consuming `(token, prf_output)` from the Poseidon2 component
+- values for binding public inputs
+---
+
+## Constraints
+
+In an AIR, constraints are polynomial identities that must hold at every row (or at boundaries). Below are the core ones.
+
+### 1. Boolean flags
+`is_green` and `is_padding` must be bits:
+
+```rust
+is_green * (is_green - 1) = 0
+is_padding * (is_padding - 1) = 0
+```
+
+### 2. Accumulator initialization
+
+On the first row, initialize the counter. I use `is_first` as a selector that is `1` on the first row and `0` elsewhere:
+
+```rust
+// On first row: green_count = is_green (unless padding)
+is_first * (green_count - is_green * (1 - is_padding)) = 0
+```
+
+### 3. Accumulator update
+
+On all non-first rows, the running sum must update correctly:
+
+```rust
+(1 - is_first) * (green_count - green_count_prev - is_green * (1 - is_padding)) = 0
+```
+
+Meaning:
+
+$$
+\text{green\_count}[i] = \text{green\_count}[i-1] + \text{is\_green}[i] \cdot (1 - \text{is\_padding}[i])
+$$
+
+Padding rows contribute zero.
+
+### 4. Correct green classification
+
+`is_green` must reflect the comparison `prf_output < threshold`. This is handled by range-check.
+
+---
+
+## Binding the public inputs
+
+A verifier needs to know *what* statement is being proven. In this construction, public inputs include:
+
+* the token sequence,
+* the final green count,
+* and the threshold parameters.
+
+These are bound using additional LogUp interactions that force selected trace values to match the claimed public values.
+
+---
+
+## Performance
+
+Benchmarks on my machine (Apple M3 Pro):
+
+| Tokens | Prove Time | Verify Time |
+| ------ | ---------- | ----------- |
+| 256    | ~16ms      | ~644µs      |
+| 512    | ~30ms      | ~607µs      |
+| 1024   | ~90ms      | ~787µs      |
+| 2048   | ~320ms     | ~1.12ms     |
+
+For context, a typical LLM response is ~200–500 tokens. That means we can generate a proof in **tens of milliseconds** and verify it in **under a millisecond**.
+
+---
+
+## What the verifier learns (and what they don’t)
+
+After verifying the proof, the verifier is convinced that:
+
+1. The prover knows a secret key `k`
+2. For the provided token sequence, applying `PRF_k` yields a green count exceeding the detection threshold
+3. Therefore the text is watermarked (with high probability)
+
+The verifier does **not** learn:
+
+* the secret key `k`
+* which individual tokens were classified green vs. red
+
+That’s the intended “zero-knowledge flavor”: the proof reveals the conclusion without exposing the key or per-token classifications.
+
+### Important note about “zero-knowledge” in Stwo
+
+As of the time of this writing, Stwo does not provide the "zero-knowledge" feature. "Zero-knowledge" here refers to the fact that the proof should not reveal any additional information other than the validity of the statement, which is not true for Stwo as it reveals to the verifier commitments to its witness values without hiding them by e.g. adding randomness. This reveals some information about the witness values, which may be used in conjunction with other information to infer the witness values.
+
+---
+
+## Code
+
+The full implementation is here:
+[https://github.com/raphaelDkhn/zunigram](https://github.com/raphaelDkhn/zunigram)
+
+---
+
+## References
+
+* [Provable Robust Watermarking for AI-Generated Text](https://arxiv.org/abs/2306.17439) — Zhao et al., ICLR 2024
+* [Stwo Prover](https://github.com/starkware-libs/stwo) — StarkWare’s Circle STARK implementation
+* [Stwo Documentation](https://zksecurity.github.io/stwo-book/) — guide to building AIRs with Stwo
+* [Provable Watermark Extraction](https://www.ingonyama.com/post/provable-watermark-extraction) — Ingonyama article on provable watermark extraction
