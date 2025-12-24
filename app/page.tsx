@@ -58,9 +58,9 @@ export default function Home() {
             </a>
             .
             <br />
-            This website is where I share whatever interests me. I’m not much of
-            a writer, so posts will be short and rough—just a place for me to
-            think out loud and explore ideas
+            This website is where I share everything that interests me. I'm not
+            really a writer, so the articles will be short and raw, just a place
+            where I can think out loud and explore ideas.
           </p>
 
           <br />
