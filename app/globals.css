@@ -17,10 +17,16 @@
   --font-sans: "Google Sans Code", monospace;
 }
 
+html {
+  overflow-x: hidden;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  overflow-x: hidden;
+  width: 100%;
 }
 
 /* Center block-level LaTeX formulas */
@@ -52,4 +58,41 @@ pre:not(.hljs-wrapper) {
 
 .dark pre:not(.hljs-wrapper) {
   background: rgb(31 41 55) !important; /* gray-800 */
+}
+
+/* Inline code styling - ensure good contrast in light mode */
+code:not(pre code):not(.hljs) {
+  background-color: rgb(229 231 235) !important; /* gray-200 */
+  color: rgb(17 24 39) !important; /* gray-900 */
+}
+
+.dark code:not(pre code):not(.hljs) {
+  background-color: rgb(31 41 55) !important; /* gray-800 */
+  color: var(--foreground) !important;
+}
+
+/* Mobile responsiveness for code blocks and tables */
+@media (max-width: 640px) {
+  pre {
+    word-break: break-word;
+    white-space: pre-wrap;
+    max-width: 100%;
+  }
+  
+  pre code {
+    white-space: pre;
+    word-break: normal;
+  }
+  
+  /* Ensure tables scroll horizontally on mobile */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+  
+  /* Prevent images from overflowing */
+  img {
+    max-width: 100%;
+    height: auto;
+  }
 }

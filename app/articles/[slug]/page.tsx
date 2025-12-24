@@ -82,27 +82,27 @@ export default async function ArticlePage({
   const components = useMDXComponents({}) as any;
 
   return (
-    <div className="min-h-screen bg-[var(--background)]">
-      <main className="max-w-4xl mx-auto px-8 py-16 sm:px-16">
-        <div className="max-w-2xl">
+    <div className="min-h-screen bg-[var(--background)] overflow-x-hidden">
+      <main className="max-w-4xl mx-auto px-4 py-8 sm:px-8 sm:py-16 md:px-16 overflow-x-hidden">
+        <div className="max-w-2xl overflow-x-hidden">
           <ArticleHeader />
           {article.meta.bannerImage && (
-            <div className="mb-8">
+            <div className="mb-6 sm:mb-8">
               <Image
                 src={article.meta.bannerImage}
                 alt={article.meta.title}
                 width={1200}
                 height={600}
-                className="w-full h-auto object-cover"
+                className="w-full h-auto object-cover rounded"
                 priority
               />
             </div>
           )}
-          <h1 className="text-[var(--foreground)] text-5xl font-bold leading-tight mb-4">
+          <h1 className="text-[var(--foreground)] text-3xl sm:text-4xl md:text-5xl font-bold leading-tight mb-4">
             {article.meta.title}
           </h1>
           {article.meta.date && (
-            <p className="text-[var(--foreground)] text-xs mb-8 opacity-70">
+            <p className="text-[var(--foreground)] text-xs mb-6 sm:mb-8 opacity-70">
               {new Date(article.meta.date).toLocaleDateString("en-US", {
                 year: "numeric",
                 month: "long",

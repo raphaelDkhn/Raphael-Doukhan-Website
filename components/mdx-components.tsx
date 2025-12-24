@@ -8,22 +8,22 @@ export type MDXComponents = {
 export function useMDXComponents(components: MDXComponents): MDXComponents {
   return {
     h1: ({ children }) => (
-      <h1 className="text-[var(--foreground)] text-3xl font-bold leading-7 mt-8 mb-4">
+      <h1 className="text-[var(--foreground)] text-2xl sm:text-3xl font-bold leading-7 mt-6 sm:mt-8 mb-3 sm:mb-4">
         {children}
       </h1>
     ),
     h2: ({ children }) => (
-      <h2 className="text-[var(--foreground)] text-2xl font-bold leading-7 mt-6 mb-3">
+      <h2 className="text-[var(--foreground)] text-xl sm:text-2xl font-bold leading-7 mt-5 sm:mt-6 mb-2 sm:mb-3">
         {children}
       </h2>
     ),
     h3: ({ children }) => (
-      <h3 className="text-[var(--foreground)] text-xl font-bold leading-7 mt-4 mb-2">
+      <h3 className="text-[var(--foreground)] text-lg sm:text-xl font-bold leading-7 mt-4 mb-2">
         {children}
       </h3>
     ),
     p: ({ children }) => (
-      <p className="text-[var(--foreground)] text-sm leading-7 mb-4 text-justify">{children}</p>
+      <p className="text-[var(--foreground)] text-sm leading-7 mb-4 sm:text-justify">{children}</p>
     ),
     a: ({ href, children }) => (
       <a
@@ -36,12 +36,12 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
       </a>
     ),
     ul: ({ children }) => (
-      <ul className="list-disc list-inside text-[var(--foreground)] text-sm leading-7 mb-4 ml-4">
+      <ul className="list-disc list-inside text-[var(--foreground)] text-sm leading-7 mb-4 ml-2 sm:ml-4">
         {children}
       </ul>
     ),
     ol: ({ children }) => (
-      <ol className="list-decimal list-inside text-[var(--foreground)] text-sm leading-7 mb-4 ml-4">
+      <ol className="list-decimal list-inside text-[var(--foreground)] text-sm leading-7 mb-4 ml-2 sm:ml-4">
         {children}
       </ol>
     ),
@@ -60,7 +60,7 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
       }
       // Otherwise, it's inline code
       return (
-        <code className="bg-gray-100 dark:bg-gray-800 text-[var(--foreground)] px-1 py-0.5 rounded text-xs font-mono" {...props}>
+        <code className="bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-[var(--foreground)] px-1.5 py-0.5 rounded text-xs font-mono font-medium" {...props}>
           {children}
         </code>
       );
@@ -71,7 +71,7 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
         (children as any)?.props?.className?.includes('hljs');
       return (
         <pre 
-          className={`${hasHighlightedCode ? 'hljs-wrapper' : 'bg-gray-100 dark:bg-gray-800'} p-4 rounded overflow-x-auto mb-4 text-xs font-mono`}
+          className={`${hasHighlightedCode ? 'hljs-wrapper' : 'bg-gray-100 dark:bg-gray-800'} p-3 sm:p-4 rounded overflow-x-auto mb-4 text-xs font-mono`}
           {...props}
         >
           {children}
