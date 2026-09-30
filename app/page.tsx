@@ -47,16 +47,7 @@ export default function Home() {
           </div>
           <br />
           <p className="text-[var(--foreground)] text-sm leading-7">
-            Hi, I’m Raphael, a software engineer at{" "}
-            <a
-              href="https://www.gizatech.xyz/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[var(--foreground)] hover:opacity-80"
-            >
-              Giza
-            </a>
-            .
+            Hi, I’m Raphael, a software engineer currently building in stealth.
             <br />
             This website is where I share everything that interests me. I'm not
             really a writer, so the articles will be short and raw, just a place
